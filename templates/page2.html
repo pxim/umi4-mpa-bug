@@ -1,0 +1,180 @@
+<!--
+ * @Author: Peng Xiang (Email:px.i@foxmail.com QQ:245803627)
+ * @Date: 2023-02-21 15:27:29
+ * @LastEditTime: 2023-04-10 17:41:05
+ * @LastEditors: Peng Xiang
+ * @Description: 
+ * @FilePath: \templates\page2.html
+ * 
+-->
+<!DOCTYPE html>
+<html lang="zh">
+
+<head>
+    <title>
+        <%= title %>
+    </title>
+    <meta charset="utf-8" />
+    <meta name="generator" content="http://www.jingge.com/" />
+    <meta name="author" content="PengXiang   email: px.i@foxmail.com" />
+    <meta name="theme-color" content="#000000" />
+    <meta name="renderer" content="webkit" />
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge,chrome=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0, minimal-ui" />
+    <!-- <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0"> -->
+    <meta name="keywords" content="jingge, h5, 3d, web3d, webgl" />
+    <meta name="description" content="res page" />
+    <!-- <link rel="icon" href="./favicon.ico" /> -->
+    <!-- <link rel="apple-touch-icon" href="./logo192.png" /> -->
+
+
+    <script type="x-shader/x-vertex" id="vertexShader">
+
+        varying vec3 vWorldPosition;
+        void main() {
+            vec4 worldPosition = modelMatrix * vec4( position, 1.0 );
+            vWorldPosition = worldPosition.xyz;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
+        }
+    </script>
+
+    <script type="x-shader/x-fragment" id="fragmentShader">
+        uniform vec3 topColor;
+        uniform vec3 bottomColor;
+        uniform float offset;
+        uniform float exponent;
+        varying vec3 vWorldPosition;
+        void main() {
+            float h = normalize( vWorldPosition + offset ).y;
+            gl_FragColor = vec4( mix( bottomColor, topColor, max( pow( max( h , 0.0), exponent ), 0.0 ) ), 1.0 );
+        }
+    </script>
+
+    <script id="vertexShader2" type="x-shader/x-vertex">
+    varying vec2 vUv;
+    varying vec3 vWorldPosition;
+    varying vec3 vWorldNormal;
+    void main() {
+    vUv = uv;
+      vWorldPosition = (modelMatrix * vec4(position, 1.0)).xyz;
+      vWorldNormal = normalize(vec3(vec4(normal, 0.0) * modelMatrix));
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+    </script>
+    <script id="fragmentShader2" type="x-shader/x-vertex">
+    varying vec2 vUv;
+    varying vec3 vWorldPosition;
+    varying vec3 vWorldNormal;
+    
+    uniform float u_Progress1;
+    uniform float u_Progress2;
+    uniform float u_Progress3;
+    uniform float u_TransitionSmoothness;
+    uniform float u_Time;
+    uniform vec3 u_Color;
+    uniform float u_FresnelFalloff;
+    uniform sampler2D t_AlphaMap;
+    
+    float rand(vec2 n) {
+    return fract(sin(dot(n, vec2(12.9898, 4.1414))) * 43758.5453);
+    }
+    
+    float noise(vec2 p){
+    vec2 ip = floor(p);
+    vec2 u = fract(p);
+    u = u*u*(3.0-2.0*u);
+    
+    float res = mix(
+    mix(rand(ip),rand(ip+vec2(1.0,0.0)),u.x),
+    mix(rand(ip+vec2(0.0,1.0)),rand(ip+vec2(1.0,1.0)),u.x),u.y);
+    return res*res;
+    }
+    float remap(float value, float low1, float high1, float low2, float high2) {
+    return low2 + (high2 - low2) * (value - low1) / (high1 - low1);
+    }
+    
+    float fresnel(vec3 cameraPosition, vec3 worldPosition, vec3 worldNormal, float falloff) {
+    vec3 viewDirection = normalize(cameraPosition - worldPosition);
+    
+    float effect = dot(viewDirection, worldNormal);
+    effect = clamp(1.0 - effect, 0., 1.0);
+    effect = pow(effect, falloff);
+    return effect;
+    }
+    
+    float random(float n) {
+    return fract(sin(n) * 43758.5453123);
+    }
+    
+    void main() {
+    vec2 gv = floor(vUv * 35.0 - vec2(0.0, u_Time*1.5));
+    float pattern = noise(gv);
+    
+    // alpha map
+    float alphaMapB = texture2D(t_AlphaMap, vUv * vec2(0.0, 0.8) + vec2(0.0, u_Time*0.03)).b;
+    
+    // Noise
+    float noisy = noise(floor(vUv*1300.) + floor(random(u_Time)*100.0));
+    noisy *= alphaMapB;
+    
+    // Fresnel
+    float frn = fresnel(cameraPosition, vWorldPosition, vWorldNormal, u_FresnelFalloff);
+    
+    vec4 l1 = vec4(u_Color, 0.5);
+    vec4 l2 = vec4(u_Color, 1.0);
+    l2 = l2 * clamp(alphaMapB, 0.1, 0.85);
+    l2.a = clamp(noisy, 0.0, 0.35);
+    
+    #if !defined(FLIP_SIDED)
+    l2 = mix(l2, l1, frn);
+    #endif
+    
+    vec4 l3 = vec4(u_Color, 1.0);
+    l3 = l3 * step(0.99, fract(vUv.y*4.6+u_Time*0.3));
+    
+    // 01. Base layer
+    float p1 = u_Progress1;
+    p1 = remap(p1, 0.0, 1.0, -u_TransitionSmoothness, 1.0);
+    p1 = smoothstep(p1, p1 + u_TransitionSmoothness, 1.0 - vUv.y);
+    
+    float mix1 = 2.0*p1 - pattern;
+    mix1 = clamp(mix1, 0.0, 1.0);
+    
+    // 02. Wide bands layer
+    float p2 = u_Progress2;
+    p2 = remap(p2, 0.0, 1.0, -u_TransitionSmoothness, 1.0);
+    p2 = smoothstep(p2, p2 + u_TransitionSmoothness, 1.0 - vUv.y);
+    
+    float mix2 = 2.0*p2 - pattern;
+    mix2 = clamp(mix2, 0.0, 1.0);
+    
+    // 03. Thin bands layer
+    float p3 = u_Progress3;
+    p3 = remap(p3, 0.0, 1.0, -u_TransitionSmoothness, 1.0);
+    p3 = smoothstep(p3, p3 + u_TransitionSmoothness, 1.0 - vUv.y);
+    
+    float mix3 = 2.0*p3 - pattern;
+    mix3 = clamp(mix3, 0.0, 1.0);
+    
+    // Mix layers
+    vec4 layer1 = mix(vec4(0.0), l1, 1.0 - mix1);
+    vec4 layer2 = mix(layer1, l2, 1.0 - mix2);
+    vec4 layer3 = mix(layer2, l3, l3.a*(1.0 - mix3));
+    vec4 color = layer3;
+    gl_FragColor = color;
+    // cool colors
+    // gl_FragColor = vec4(vWorldPosition*vWorldNormal, 1.0);
+    }
+    </script>
+</head>
+
+
+
+<body>
+    <div id="<%= mountElementId %>"></div>
+    <div id="container"></div>
+</body>
+
+
+
+</html>
